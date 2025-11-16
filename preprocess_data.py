@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
+from pyexpat import model
 import urllib
 import zipfile
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -10,7 +10,7 @@ import tiktoken
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import GPT2Model
 
 
 def download_data(url,zip_filename,extracted_filepath,data_file_path):
@@ -87,30 +87,46 @@ class makespamDataset(Dataset):
         max_len = max(len(enc) for enc in self.encodings if len(enc) > max_len)
         return max_len
 
+def assign_check(target, source):
+    if target.shape != source.T.shape:
+        raise ValueError(f"Shape mismatch: target {target.shape}, source {source.shape}")
+    return torch.nn.Parameter(source.clone().detach())
 
-# gpt2_downloader.py
-def download_and_load_gpt2(model_name="gpt2", out_dir="gpt2_hf1"):
-    """
-    Downloads and loads a GPT-2 model and tokenizer using Hugging Face Transformers.
+def load_weights(gpt, gpt_hf, BASE_CONFIG):
 
-    Args:
-        model_name (str): Model size string — one of:
-            "gpt2" (124M), "gpt2-medium" (355M),
-            "gpt2-large" (774M), "gpt2-xl" (1558M)
-        out_dir (str): Directory to save model files
+    d = gpt_hf.state_dict()
 
-    Returns:
-        model: Hugging Face GPT-2 model (torch.nn.Module)
-        tokenizer: Hugging Face GPT-2 tokenizer
-    """
-    os.makedirs(out_dir, exist_ok=True)
+    gpt.position_embedding.weight = assign_check(gpt.position_embedding.weight, d["wpe.weight"])
+    gpt.token_embedding.weight = assign_check(gpt.token_embedding.weight, d["wte.weight"])
+    
+    for b in range(BASE_CONFIG["n_layers"]):
+        q_w, k_w, v_w = np.split(d[f"h.{b}.attn.c_attn.weight"], 3, axis=-1)
+        gpt.transformer_blocks[b].att.W_q.weight = assign_check(gpt.transformer_blocks[b].att.W_q.weight, q_w.T)
+        gpt.transformer_blocks[b].att.W_k.weight = assign_check(gpt.transformer_blocks[b].att.W_k.weight, k_w.T)
+        gpt.transformer_blocks[b].att.W_v.weight = assign_check(gpt.transformer_blocks[b].att.W_v.weight, v_w.T)
 
-    print(f"Downloading {model_name} model from Hugging Face...")
-    model = GPT2LMHeadModel.from_pretrained(model_name, cache_dir=out_dir)
-    tokenizer = GPT2Tokenizer.from_pretrained(model_name, cache_dir=out_dir)
+        q_b, k_b, v_b = np.split(d[f"h.{b}.attn.c_attn.bias"], 3, axis=-1)
+        gpt.transformer_blocks[b].att.W_q.bias = assign_check(gpt.transformer_blocks[b].att.W_q.bias, q_b)
+        gpt.transformer_blocks[b].att.W_k.bias = assign_check(gpt.transformer_blocks[b].att.W_k.bias, k_b)
+        gpt.transformer_blocks[b].att.W_v.bias = assign_check(gpt.transformer_blocks[b].att.W_v.bias, v_b)
 
-    return model, tokenizer
 
+        gpt.transformer_blocks[b].att.out.weight = assign_check(gpt.transformer_blocks[b].att.out.weight, d[f"h.{b}.attn.c_proj.weight"].T)
+        gpt.transformer_blocks[b].att.out.bias = assign_check(gpt.transformer_blocks[b].att.out.bias, d[f"h.{b}.attn.c_proj.bias"])
+
+        gpt.transformer_blocks[b].ff.layers[0].weight = assign_check(gpt.transformer_blocks[b].ff.layers[0].weight, d[f"h.{b}.mlp.c_fc.weight"].T)
+        gpt.transformer_blocks[b].ff.layers[0].bias = assign_check(gpt.transformer_blocks[b].ff.layers[0].bias, d[f"h.{b}.mlp.c_fc.bias"])
+        gpt.transformer_blocks[b].ff.layers[2].weight = assign_check(gpt.transformer_blocks[b].ff.layers[2].weight, d[f"h.{b}.mlp.c_proj.weight"].T)
+        gpt.transformer_blocks[b].ff.layers[2].bias = assign_check(gpt.transformer_blocks[b].ff.layers[2].bias, d[f"h.{b}.mlp.c_proj.bias"])
+
+        gpt.transformer_blocks[b].norm1.scale = assign_check(gpt.transformer_blocks[b].norm1.scale, d[f"h.{b}.ln_1.weight"])
+        gpt.transformer_blocks[b].norm1.shift = assign_check(gpt.transformer_blocks[b].norm1.shift, d[f"h.{b}.ln_1.bias"])
+        gpt.transformer_blocks[b].norm2.scale = assign_check(gpt.transformer_blocks[b].norm2.scale, d[f"h.{b}.ln_2.weight"])
+        gpt.transformer_blocks[b].norm2.shift = assign_check(gpt.transformer_blocks[b].norm2.shift, d[f"h.{b}.ln_2.bias"])
+
+        gpt.final_norm.scale = assign_check(gpt.final_norm.scale, d["ln_f.weight"])
+        gpt.final_norm.shift = assign_check(gpt.final_norm.shift, d["ln_f.bias"])
+        gpt.out_head.weight = assign_check(gpt.out_head.weight, d["wte.weight"])
 
 
 

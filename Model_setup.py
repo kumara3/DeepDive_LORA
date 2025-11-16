@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import urllib
 import zipfile
-
+import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -11,18 +11,20 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
+
+
 class LayerNorm(nn.Module):
     def __init__(self, emb_dim, eps=1e-5):
         super().__init__()
         self.eps = eps
-        self.gamma = nn.Parameter(torch.ones(emb_dim))
-        self.beta = nn.Parameter(torch.zeros(emb_dim))
+        self.scale = nn.Parameter(torch.ones(emb_dim))
+        self.shift = nn.Parameter(torch.zeros(emb_dim))
 
     def forward(self, x):
         x_mean = x.mean(-1, keepdim=True)
         x_var = x.var(-1, keepdim=True, unbiased=False)
         x_norm = (x - x_mean) / torch.sqrt(x_var + self.eps)
-        return self.gamma * x_norm + self.beta
+        return self.scale * x_norm + self.shift
 
 class GELU(nn.Module):
     def __init__(self):
@@ -132,7 +134,7 @@ class GPT(nn.Module):
 
         self.transformer_blocks = nn.Sequential(*[TransformerBlock(config) for _ in range(config["num_layers"])])
         self.final_norm = LayerNorm(config["emb_dim"])
-        self.out = nn.Linear(config["emb_dim"], config["vocab_size"], bias=False)
+        self.out_head = nn.Linear(config["emb_dim"], config["vocab_size"], bias=False)
 
     def forward(self,idx):
         batch_size, seq_len = idx.shape
@@ -142,5 +144,111 @@ class GPT(nn.Module):
         x = self.drop_emb(x)
         x = self.transformer_blocks(x)
         x = self.final_norm(x)
-        logits = self.out(x)
+        logits = self.out_head(x)
         return logits
+
+def calc_accuracy(data_loader, model, num_batches=None):
+    model.eval()
+    correct_predictions, num_examples = 0, 0
+
+    if num_batches is None:
+        num_batches = len(data_loader)
+    else:
+        num_batches = min(num_batches, len(data_loader))
+    for i, (input_batch, target_batch) in enumerate(data_loader):
+        if i < num_batches:
+            with torch.no_grad():
+                logits = model(input_batch)[:, -1, :] # get logits for the last token only
+            predicted_labels = torch.argmax(logits, dim=-1) # get the predicted labels
+
+            num_examples += predicted_labels.shape[0]
+            correct_predictions += (
+                (predicted_labels == target_batch).sum().item()
+            )
+        else:
+            break
+    return correct_predictions / num_examples
+
+def calc_loss(input_batch, target_batch, model):
+    logits = model(input_batch)[:, -1, :]
+    loss = torch.nn.functional.cross_entropy(logits, target_batch)
+    return loss
+
+def calc_loss_loader(data_loader, model, num_batches=None):
+    total_loss = 0.0
+    if len(data_loader) == 0:
+        return float("nan")
+    elif num_batches is None:
+        num_batches = len(data_loader)
+    else:
+        num_batches = min(num_batches, len(data_loader))
+    for i, (input_batch, target_batch) in enumerate(data_loader):
+        if i < num_batches:
+            loss = calc_loss(
+                input_batch, target_batch, model)
+            total_loss += loss.item()
+        else:
+            break
+    return total_loss / num_batches
+
+def evaluate_model(model, train_loader, val_loader, eval_iter):
+    model.eval()
+    with torch.no_grad():
+        train_loss = calc_loss_loader(
+            train_loader, model, num_batches=eval_iter
+        )
+        val_loss = calc_loss_loader(
+            val_loader, model, num_batches=eval_iter
+        )
+    model.train()
+    return train_loss, val_loss
+
+def train_classifier(model, train_loader, val_loader, optimizer, num_epochs, eval_iter, eval_iter_val):
+    train_losses, val_losses, train_acc, val_acc = [], [], [], []
+    examples_seen = 0
+    step = 0
+    for epoch in range(num_epochs):
+        model.train()
+        for input_batch, target_batch in train_loader:
+            optimizer.zero_grad()
+            loss = calc_loss(input_batch, target_batch, model)
+            loss.backward()
+            optimizer.step()
+            examples_seen += input_batch.shape[0]
+            step += 1
+
+            if step % eval_iter == 0:
+                train_loss, val_loss = evaluate_model(
+                    model, train_loader, val_loader, eval_iter)
+                train_losses.append(train_loss)
+                val_losses.append(val_loss)
+                print(
+                    f"Epoch {epoch+1}/{num_epochs} :- "
+                    f"Step {step} - "
+                    f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+                
+        train_accuracy = calc_accuracy(train_loader, model, num_batches=eval_iter_val)
+        val_accuracy = calc_accuracy(val_loader, model, num_batches=eval_iter_val)
+
+        train_acc.append(train_accuracy)
+        val_acc.append(val_accuracy)
+        print(f"Train Accuracy: {train_accuracy*100:.4f}% | ",end="")
+        print(f"Val Accuracy: {val_accuracy*100:.4f}%")
+
+        return train_losses, val_losses, train_acc, val_acc, examples_seen
+    
+    def plot_metrics(epoch, examples, train_val, val_vals, label="loss"):
+        fig,ax1 = plt.subplots(figsize=(8,6))
+        ax1.plot(epoch, train_val, label="Training "+label)
+        ax1.plot(epoch, val_vals, label="Validation "+label)
+        ax1.set_xlabel("Epochs")
+        ax1.set_ylabel(label.capitalize())
+        ax1.legend()
+
+        ax2 = ax1.twiny()
+        ax2.plot(examples, train_val, alpha=0)
+        ax2.set_xlabel("Examples Seen")
+
+        fig.tight_layout()
+        plt.savefig()(f"{label}_plot.png")
+        plt.show()
