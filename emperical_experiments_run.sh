@@ -1,0 +1,16 @@
+python exp2.py --lora_rank 4 --lora_alpha 4 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 8 --lora_alpha 4 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 16 --lora_alpha 4 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 32 --lora_alpha 4 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 4 --lora_alpha 8 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 8 --lora_alpha 8 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 16 --lora_alpha 8 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 32 --lora_alpha 8 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 4 --lora_alpha 16 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 8 --lora_alpha 16 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 16 --lora_alpha 16 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 32 --lora_alpha 16 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 4 --lora_alpha 32 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 8 --lora_alpha 32 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 16 --lora_alpha 32 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
+python exp2.py --lora_rank 32 --lora_alpha 32 --trainable_layers lora last_layer last_block all --num_epochs 20 --batch_size 8
